@@ -1,39 +1,39 @@
-package ru.mipt.bit.platformer.input; // пакет для ввода
-
-import ru.mipt.bit.platformer.input.InputHandler;
+package ru.mipt.bit.platformer.input;
 
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
-    // обработсик ввода InputHandler.
-    // Идея: регистрируем обработчики (Runnable) на код клавиши.
-    // Для тестов есть метод handlePressedKeys(Set<Integer>), который не зависит от Gdx.
+
+/**
+ * Обработчик ввода — регистрирует действия на определённые клавиши.
+ * Позволяет вызывать зарегистрированные команды при нажатии клавиш.
+ */
 public class InputHandler {
-    // map: keyCode -> list of handlers
+
+    // ключ — код клавиши, значение — список действий (Runnable)
     private final Map<Integer, List<Runnable>> handlers = new HashMap<>();
-    // Регистрируем обработчик для keyCode
+
+    // регистрируем новое действие на клавишу
     public void register(int keyCode, Runnable action) {
-    // используем CopyOnWriteArrayList чтобы можно было регистрировать/удалять из разных потоков безопаснее
         handlers.computeIfAbsent(keyCode, k -> new CopyOnWriteArrayList<>()).add(action);
     }
-    // Удаление обработчика (полезно для тестов и динамики)
+
+    // удаляем обработчик
     public void unregister(int keyCode, Runnable action) {
         List<Runnable> list = handlers.get(keyCode);
         if (list != null) list.remove(action);
     }
 
-    // Метод, который мы вызываем в игровом цикле: передаём набор нажатых клавиш.
-// действия для всех нажатых клавишь
+    // вызываем все действия для нажатых клавиш
     public void handlePressedKeys(Set<Integer> pressedKeys) {
-        if (pressedKeys == null || pressedKeys.isEmpty()) return; // нет нажатий
+        if (pressedKeys == null || pressedKeys.isEmpty()) return;
         for (Integer key : pressedKeys) {
             List<Runnable> list = handlers.get(key);
             if (list == null) continue;
             for (Runnable r : list) {
                 try {
-                    r.run(); // выполняем зарегистрированное действие
+                    r.run();
                 } catch (Exception e) {
-// Не даём одному падению сломать все обработчики — логируем при необходимости
-                    e.printStackTrace();
+                    e.printStackTrace(); // чтобы не ломались остальные обработчики
                 }
             }
         }
