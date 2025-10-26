@@ -32,15 +32,14 @@ public class GameDesktopLauncher implements ApplicationListener {
     private TreeModel treeModel;         // логика дерева (препятствие)
     private TreeView treeView;           // отрисовка дерева
     private InputHandler inputHandler;   // система ввода
+    private List<TreeView> treeViews;
 
     // Реализация проверки коллизий
     private static class SimpleCollisionChecker implements CollisionChecker {
         private final List<Obstacle> obstacles;
-
         public SimpleCollisionChecker(List<Obstacle> obstacles) {
             this.obstacles = obstacles;
         }
-
         @Override
         public boolean isBlocked(GridPoint2 position) {
             return obstacles.stream().anyMatch(o -> o.getCoordinates().equals(position));
@@ -52,25 +51,36 @@ public class GameDesktopLauncher implements ApplicationListener {
         batch = new SpriteBatch();
         gameField = new GameField(batch);
 
-        // Создаём модель танка
-        tankModel = new TankModel(new GridPoint2(1, 1));
+        LevelLoader loader = new LevelLoader(10, 8);
+        LevelLoader.LevelData levelData;
+
+        try {
+            boolean useFile = true; // true — из файла, false — случайно
+            if (useFile) {
+                levelData = loader.loadFromFile("level.txt");
+            } else {
+                levelData = loader.generateRandom(8);
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Ошибка при загрузке уровня", e);
+        }
+
+        // Создаём танк на позиции игрока
+        tankModel = new TankModel(levelData.playerStart);
         tankView = new TankView(tankModel, batch, gameField.getMovement());
 
-        // Создаём модель дерева
-        treeModel = new TreeModel(new GridPoint2(1, 3));
-        treeView = new TreeView(treeModel, batch, gameField.getGroundLayer());
+        // Создаём TreeView для всех деревьев
+        treeViews = new ArrayList<>();
+        for (Obstacle o : levelData.obstacles) {
+            TreeModel tree = (TreeModel) o;
+            treeViews.add(new TreeView(tree, batch, gameField.getGroundLayer()));
+        }
 
-        // Собираем все препятствия
-        List<Obstacle> obstacles = new ArrayList<>();
-        obstacles.add(treeModel);
+        // Проверка коллизий
+        CollisionChecker collisionChecker = new SimpleCollisionChecker(levelData.obstacles);
 
-        // Создаём проверку коллизий
-        CollisionChecker collisionChecker = new SimpleCollisionChecker(obstacles);
-
-        // Система ввода
+        // Настройка ввода
         inputHandler = new InputHandler();
-
-        // Создаём контроллер управления танком (стрелки + WASD)
         TankController controller = new StandardTankController(tankModel, collisionChecker);
         controller.registerControls(inputHandler);
     }
@@ -87,12 +97,8 @@ public class GameDesktopLauncher implements ApplicationListener {
         // собираем нажатые клавиши
         Set<Integer> pressedKeys = new HashSet<>();
         for (int key = 0; key < 256; key++) {
-            if (Gdx.input.isKeyPressed(key)) {
-                pressedKeys.add(key);
-            }
+            if (Gdx.input.isKeyPressed(key)) pressedKeys.add(key);
         }
-
-        // передаём нажатия в обработчик
         inputHandler.handlePressedKeys(pressedKeys);
 
         // обновляем логику танка
@@ -103,7 +109,7 @@ public class GameDesktopLauncher implements ApplicationListener {
 
         // рисуем объекты
         batch.begin();
-        treeView.render();
+        for (TreeView tv : treeViews) tv.render(); // отрисовка всех деревьев
         tankView.render();
         batch.end();
     }
@@ -119,7 +125,7 @@ public class GameDesktopLauncher implements ApplicationListener {
 
     @Override
     public void dispose() {
-        treeView.dispose();
+        for (TreeView tv : treeViews) tv.dispose(); // корректная очистка всех деревьев
         tankView.dispose();
         gameField.dispose();
         batch.dispose();
