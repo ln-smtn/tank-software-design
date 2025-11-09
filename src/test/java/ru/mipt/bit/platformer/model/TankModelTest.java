@@ -28,7 +28,8 @@ class TankModelTest {
 
     @Test
     void requestMove_blockedByTree() {
-        TankModel tank = new TankModel(new GridPoint2(1,1));
+        TankModel tank = new TankModel(new GridPoint2(1,1), 5f);
+
 
         // Блокируем клетку (2,1)
         Predicate<GridPoint2> blockAt2_1 = p -> (p.x == 2 && p.y == 1);
