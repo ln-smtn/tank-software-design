@@ -84,4 +84,13 @@ public class LevelLoader {
             this.playerStart = playerStart;
         }
     }
+    // геттеры размеров поля
+
+    public int getWidth() {
+        return width;
+    }
+
+    public int getHeight() {
+        return height;
+    }
 }
