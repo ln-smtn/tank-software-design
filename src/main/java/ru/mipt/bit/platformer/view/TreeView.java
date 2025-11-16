@@ -13,7 +13,7 @@ import static ru.mipt.bit.platformer.util.GdxGameUtils.*; // Утилиты: cre
  * View для дерева — статического препятствия.
  * Сразу позиционирует rectangle в центре заданного тайла при создании.
  */
-public class TreeView {
+public class TreeView implements IView {
 
     private final Texture texture;         // текстура дерева
     private final TextureRegion graphics;  // region

@@ -4,49 +4,47 @@ import com.badlogic.gdx.math.GridPoint2;
 import java.util.*;
 
 public class GameWorld {
-    private final List<TankModel> tanks = new ArrayList<>();
-    private final List<Obstacle> obstacles;
-    private final int width;
-    private final int height;
 
-    public GameWorld(List<Obstacle> obstacles, int width, int height) {
-        this.obstacles = obstacles;
-        this.width = width;
-        this.height = height;
-    }
+    private final List<WorldObject> objects = new ArrayList<>();
+    private final List<WorldObject> pendingAdd = new ArrayList<>();
+    private final List<WorldObject> pendingRemove = new ArrayList<>();
+    private final List<LevelObserver> observers = new ArrayList<>();
 
-    public void addTank(TankModel tank) {
-        tanks.add(tank);
-    }
+    public void addObserver(LevelObserver observer) { observers.add(observer); }
 
-    public List<TankModel> getTanks() {
-        return tanks;
-    }
+    public void enqueueAdd(WorldObject obj) { pendingAdd.add(obj); }
+    public void enqueueRemove(WorldObject obj) { pendingRemove.add(obj); }
 
-    // Проверяем, можно ли занять клетку
-    public boolean isBlocked(GridPoint2 pos, TankModel self) {
-        //  Границы карты
-        // Проверка выхода за пределы карты
-        if (pos.x < 0 || pos.y < 0 || pos.x >= width || pos.y >= height - 1) return true;
-
-        // Препятствия
-        for (Obstacle o : obstacles) {
-            if (o.getCoordinates().equals(pos)) return true;
+    public void applyPendingChanges() {
+        for (WorldObject obj : pendingAdd) {
+            objects.add(obj);
+            for (LevelObserver o : observers) o.onObjectAdded(obj);
         }
+        pendingAdd.clear();
 
-        // Другие танки
-        for (TankModel tank : tanks) {
-            if (tank == self) continue;
-            GridPoint2 cur = tank.getCoordinates();
-            GridPoint2 dest = tank.getDestination();
-            if (cur.equals(pos) || dest.equals(pos)) return true;
+        for (WorldObject obj : pendingRemove) {
+            objects.remove(obj);
+            for (LevelObserver o : observers) o.onObjectRemoved(obj);
         }
+        pendingRemove.clear();
+    }
 
+    public void updateAll(float delta) {
+        for (WorldObject obj : objects) obj.live(delta);
+    }
+
+    public boolean isBlocked(GridPoint2 pos, WorldObject self) {
+        for (WorldObject obj : objects) {
+            if (obj == self) continue;
+            if (obj instanceof TankModel || obj instanceof BulletModel) {
+                GridPoint2 objPos = null;
+                if (obj instanceof TankModel) objPos = ((TankModel)obj).getCoordinates();
+                else if (obj instanceof BulletModel) objPos = ((BulletModel)obj).getCoordinates();
+                if (objPos.equals(pos)) return true;
+            }
+        }
         return false;
     }
 
-    // Упрощённый вариант для CollisionChecker
-    public boolean isBlocked(GridPoint2 pos) {
-        return isBlocked(pos, null);
-    }
+    public List<WorldObject> getObjects() { return new ArrayList<>(objects); }
 }

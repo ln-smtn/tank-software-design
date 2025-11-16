@@ -2,178 +2,113 @@ package ru.mipt.bit.platformer;
 
 import com.badlogic.gdx.ApplicationListener;
 import com.badlogic.gdx.Gdx;
-import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
-import com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration;
+import com.badlogic.gdx.backends.lwjgl3.*;
 import com.badlogic.gdx.graphics.g2d.Batch;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.math.GridPoint2;
-import ru.mipt.bit.platformer.input.InputHandler;
-import ru.mipt.bit.platformer.input.StandardTankController;
-import ru.mipt.bit.platformer.input.TankController;
+
+import ru.mipt.bit.platformer.input.*;
 import ru.mipt.bit.platformer.model.*;
-import ru.mipt.bit.platformer.view.TankView;
-import ru.mipt.bit.platformer.view.TankViewWithHealth;
-import ru.mipt.bit.platformer.view.TreeView;
-import ru.mipt.bit.platformer.input.RandomTankController;
+import ru.mipt.bit.platformer.view.LevelViewObserver;
+
 import java.util.*;
 
-/**
- * Главный класс запуска игры.
- * Разделяет:
- * - графику (View)
- * - игровую логику (Model)
- * - ввод (InputHandler + Controller)
- */
 public class GameDesktopLauncher implements ApplicationListener {
 
-    private Batch batch;                 // для отрисовки
-    private GameField gameField;         // карта уровня
-    private TankModel tankModel;         // логика танка
-    private TankView tankView;           // отрисовка танка
-    private InputHandler inputHandler;   // система ввода
-    private List<TreeView> treeViews;
-    private List<RandomTankController> aiControllers;
-    private boolean showHealthBars = false;
+    private Batch batch;
+    private GameField gameField;
+    private InputHandler inputHandler;
     private GameWorld world;
-
-
-    // Реализация проверки коллизий
-    private static class SimpleCollisionChecker implements CollisionChecker {
-        private final List<Obstacle> obstacles;
-        public SimpleCollisionChecker(List<Obstacle> obstacles) {
-            this.obstacles = obstacles;
-        }
-        @Override
-        public boolean isBlocked(GridPoint2 position) {
-            return obstacles.stream().anyMatch(o -> o.getCoordinates().equals(position));
-        }
-    }
+    private CollisionManager collisionManager;
+    private LevelViewObserver levelViewObserver;
+    private TankModel playerTank;
+    private List<RandomTankController> aiControllers;
 
     @Override
     public void create() {
+        // --- Инициализация графики ---
         batch = new SpriteBatch();
         gameField = new GameField(batch);
 
+        // --- Загрузка уровня ---
         LevelLoader loader = new LevelLoader(10, 8);
         LevelLoader.LevelData levelData;
-
         try {
-            boolean useFile = true; // true — из файла, false — случайно
-            if (useFile) {
-                levelData = loader.loadFromFile("level.txt");
-            } else {
-                levelData = loader.generateRandom(8);
-            }
-        } catch (Exception e) {
-            throw new RuntimeException("Ошибка при загрузке уровня", e);
+            levelData = loader.loadFromFile("level.txt");
+        } catch (java.io.IOException e) {
+            throw new RuntimeException("Ошибка загрузки уровня", e);
         }
-        world = new GameWorld(levelData.obstacles, loader.getWidth(), loader.getHeight());
 
-        // Создаём танк игрока
-        tankModel = new TankModel(levelData.playerStart, 5f);
+        // --- Создание игрового мира (только логика, без графики) ---
+        world = new GameWorld();
 
+        // --- Игрок ---
+        playerTank = new TankModel(levelData.playerStart);
+        world.enqueueAdd(playerTank);
 
-        world.addTank(tankModel);
-        tankView = new TankView(tankModel, batch, gameField.getMovement());
-
-        // Создаём несколько AI-танков
+        // --- AI танки ---
         aiControllers = new ArrayList<>();
-
-        Random rand = new Random();
-        for (int i = 0; i < 3; i++) { // три ИИ-танка
+        Random r = new Random();
+        for (int i = 0; i < 3; i++) {
             GridPoint2 pos;
             do {
-                pos = new GridPoint2(rand.nextInt(loader.getWidth()), rand.nextInt(loader.getHeight()));
+                pos = new GridPoint2(r.nextInt(loader.getWidth()), r.nextInt(loader.getHeight()));
             } while (world.isBlocked(pos, null));
-            TankModel aiTank = new TankModel(pos, 5f);
-            world.addTank(aiTank);
-            aiControllers.add(new RandomTankController(aiTank, world));
+            TankModel ai = new TankModel(pos);
+            world.enqueueAdd(ai);
+            aiControllers.add(new RandomTankController(ai, world));
         }
 
+        // --- Применяем добавленные объекты ---
+        world.applyPendingChanges();
 
-            // Создаём TreeView для всех деревьев
-        treeViews = new ArrayList<>();
-        for (Obstacle o : levelData.obstacles) {
-            TreeModel tree = (TreeModel) o;
-            treeViews.add(new TreeView(tree, batch, gameField.getGroundLayer()));
-        }
+        // --- Графический уровень (View) ---
+        // LevelViewObserver только читает состояние моделей, не меняет их
+        levelViewObserver = new LevelViewObserver(batch);
+        world.addObserver(levelViewObserver);
 
-        // Проверка коллизий через весь мир (границы + препятствия + танки)
-        CollisionChecker collisionChecker = world::isBlocked;
+        // --- Управление столкновениями ---
+        collisionManager = new CollisionManager(world);
 
-
-        // Настройка ввода
+        // --- Ввод игрока ---
         inputHandler = new InputHandler();
-        TankController controller = new StandardTankController(tankModel, collisionChecker);
-        controller.registerControls(inputHandler);
+        new StandardTankController(playerTank, world).registerControls(inputHandler);
     }
 
     @Override
     public void render() {
-        // очищаем экран
-        Gdx.gl.glClearColor(0f, 0f, 0.2f, 1f);
-        Gdx.gl.glClear(com.badlogic.gdx.graphics.GL20.GL_COLOR_BUFFER_BIT);
+        float dt = Gdx.graphics.getDeltaTime();
 
-        // время между кадрами
-        float deltaTime = Gdx.graphics.getDeltaTime();
+        // --- Логика: обновление мира ---
+        world.updateAll(dt);
 
-        // собираем нажатые клавиши
-        Set<Integer> pressedKeys = new HashSet<>();
-        for (int key = 0; key < 256; key++) {
-            if (Gdx.input.isKeyPressed(key)) pressedKeys.add(key);
-        }
-        inputHandler.handlePressedKeys(pressedKeys);
-
-        if (Gdx.input.isKeyJustPressed(com.badlogic.gdx.Input.Keys.L)) {
-            showHealthBars = !showHealthBars;
-        }
-
-        // обновляем логику танка
-        tankModel.update(deltaTime);
+        // --- AI танки ---
         for (RandomTankController ai : aiControllers) {
-            ai.update(deltaTime);
+            ai.updateRandom();
         }
-        // рисуем карту
-        gameField.render();
 
-        //  начинаем batch ДО всех render()
+        // --- Решение коллизий ---
+        collisionManager.resolveCollisions();
+        world.applyPendingChanges();
+
+        // --- Рендер ---
+        gameField.render();          // фон и тайлы
         batch.begin();
-
-        // рисуем деревья
-        for (TreeView tv : treeViews) tv.render();
-
-        // рисуем танки
-        for (TankModel t : world.getTanks()) {
-            if (showHealthBars) {
-                new TankViewWithHealth(t, batch, gameField.getMovement()).render();
-            } else {
-                new TankView(t, batch, gameField.getMovement()).render();
-            }
-        }
-
+        levelViewObserver.renderAll(); // рисует только View объектов
         batch.end();
     }
 
-    @Override
-    public void resize(int width, int height) {}
-
-    @Override
-    public void pause() {}
-
-    @Override
-    public void resume() {}
-
-    @Override
-    public void dispose() {
-        for (TreeView tv : treeViews) tv.dispose(); // корректная очистка всех деревьев
-        tankView.dispose();
+    @Override public void resize(int w, int h) {}
+    @Override public void pause() {}
+    @Override public void resume() {}
+    @Override public void dispose() {
         gameField.dispose();
         batch.dispose();
     }
 
     public static void main(String[] args) {
-        Lwjgl3ApplicationConfiguration config = new Lwjgl3ApplicationConfiguration();
-        config.setWindowedMode(1280, 1024);
-        new Lwjgl3Application(new GameDesktopLauncher(), config);
+        Lwjgl3ApplicationConfiguration cfg = new Lwjgl3ApplicationConfiguration();
+        cfg.setWindowedMode(1280, 720);
+        new Lwjgl3Application(new GameDesktopLauncher(), cfg);
     }
 }

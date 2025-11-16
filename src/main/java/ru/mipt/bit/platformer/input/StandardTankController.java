@@ -1,41 +1,28 @@
 package ru.mipt.bit.platformer.input;
 
 import com.badlogic.gdx.Input.Keys;
-import ru.mipt.bit.platformer.model.CollisionChecker;
-import ru.mipt.bit.platformer.model.Direction;
-import ru.mipt.bit.platformer.model.TankModel;
+import ru.mipt.bit.platformer.model.*;
 
-/**
- * Стандартное управление танком с клавиатуры:
- * стрелки + WASD.
- * Работает через InputHandler, не зависит от GDX напрямую.
- */
 public class StandardTankController implements TankController {
 
     private final TankModel tank;
-    private final CollisionChecker collisionChecker;
+    private final GameWorld world;
 
-    public StandardTankController(TankModel tank, CollisionChecker collisionChecker) {
+    public StandardTankController(TankModel tank, GameWorld world) {
         this.tank = tank;
-        this.collisionChecker = collisionChecker;
+        this.world = world;
     }
 
     @Override
-    public void registerControls(InputHandler inputHandler) {
-        // Движение вверх
-        inputHandler.register(Keys.UP, () -> tank.requestMove(Direction.UP, collisionChecker::isBlocked));
-        inputHandler.register(Keys.W, () -> tank.requestMove(Direction.UP, collisionChecker::isBlocked));
+    public void registerControls(InputHandler input) {
+        input.register(Keys.UP,    () -> tank.requestMove(Direction.UP,    pos -> world.isBlocked(pos, tank)));
+        input.register(Keys.DOWN,  () -> tank.requestMove(Direction.DOWN,  pos -> world.isBlocked(pos, tank)));
+        input.register(Keys.LEFT,  () -> tank.requestMove(Direction.LEFT,  pos -> world.isBlocked(pos, tank)));
+        input.register(Keys.RIGHT, () -> tank.requestMove(Direction.RIGHT, pos -> world.isBlocked(pos, tank)));
 
-        // Движение вниз
-        inputHandler.register(Keys.DOWN, () -> tank.requestMove(Direction.DOWN, collisionChecker::isBlocked));
-        inputHandler.register(Keys.S, () -> tank.requestMove(Direction.DOWN, collisionChecker::isBlocked));
-
-        // Движение влево
-        inputHandler.register(Keys.LEFT, () -> tank.requestMove(Direction.LEFT, collisionChecker::isBlocked));
-        inputHandler.register(Keys.A, () -> tank.requestMove(Direction.LEFT, collisionChecker::isBlocked));
-
-        // Движение вправо
-        inputHandler.register(Keys.RIGHT, () -> tank.requestMove(Direction.RIGHT, collisionChecker::isBlocked));
-        inputHandler.register(Keys.D, () -> tank.requestMove(Direction.RIGHT, collisionChecker::isBlocked));
+        input.register(Keys.SPACE, () -> {
+            BulletModel bullet = tank.createBullet(); // теперь метод без аргументов работает
+            world.enqueueAdd(bullet);
+        });
     }
 }

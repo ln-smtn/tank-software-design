@@ -1,73 +1,69 @@
 package ru.mipt.bit.platformer.model;
-import com.badlogic.gdx.math.GridPoint2; // используется только как контейнер координат
-import java.util.function.Predicate; // для передачи проверки коллизий
-import java.util.Random;
 
+import com.badlogic.gdx.math.GridPoint2;
+import java.util.function.Predicate;
 
-// Класс — чистая модель танка: состояние, запрос на движение, прогресс.
-public class TankModel {
+public class TankModel implements WorldObject {
 
-    private static final float DEFAULT_MOVEMENT_SPEED = 5f; // скорость как в вашем коде (можно менять)
+    private final String id = "tank-" + java.util.UUID.randomUUID();
+    private final GridPoint2 coordinates;
+    private GridPoint2 destination;
+    private float movementProgress = 1f;
+    private Direction lastDirection = Direction.UP;
+    private int health = 100;
 
-    private final GridPoint2 coordinates; // текущая целая координата на сетке
-    private final GridPoint2 destination; // цель перемещения (целая клетка)
-    private float movementProgress = 1f; // [0..1] прогресс между coordinates и destination
-    private float rotation = 0f; // текущий угол для отрисовки
-    private final float movementSpeed; // скорость (в секундах?) — оставляем как коэффициент
-    private int health;
-
-    // Изменим конструктор:
-    public TankModel(GridPoint2 startCoordinates, float movementSpeed) {
-        this.coordinates = new GridPoint2(startCoordinates);
-        this.destination = new GridPoint2(startCoordinates);
-        this.movementSpeed = movementSpeed;
-        this.movementProgress = 1f;
-        this.rotation = 0f;
-        this.health = 80 + new Random().nextInt(21); // 80–100
+    public TankModel(GridPoint2 start) {
+        this.coordinates = new GridPoint2(start);
+        this.destination = new GridPoint2(start);
     }
+
+    public GridPoint2 getCoordinates() { return new GridPoint2(coordinates); }
+    public GridPoint2 getDestination() { return new GridPoint2(destination); }
+    public float getMovementProgress() { return movementProgress; }
+
+    public void setLastDirection(Direction dir) { this.lastDirection = dir; }
+    public Direction getLastDirection() { return lastDirection; }
 
     public int getHealth() { return health; }
-    public void setHealth(int health) { this.health = Math.max(0, health); }
-    public boolean isAlive() { return health > 0; }
+    public void takeDamage(int dmg) { health -= dmg; }
 
+    /** Попытка движения, проверка коллизий через предикат */
+    public boolean requestMove(Direction dir, Predicate<GridPoint2> isBlocked) {
+        if (movementProgress < 1f) return false; // ещё в движении
 
-    // Попытка запросить движение. isBlocked — предикат, который возвращает true, если клетка занята.
-    // Возвращает true, если движение стартовало, false — если движение невозможно (еще двигаемся или блок).
-    public boolean requestMove(Direction direction, Predicate<GridPoint2> isBlocked) {
-    // Если мы уже движемся — отказываем
-        if (movementProgress < 1f) {
-            return false; // ещё в движении
-        }
-    // Вычисляем новую целевую клетку
-        GridPoint2 newDest = new GridPoint2(coordinates.x + direction.dx, coordinates.y + direction.dy);
+        GridPoint2 target = new GridPoint2(coordinates.x + dir.dx, coordinates.y + dir.dy);
+        if (isBlocked != null && isBlocked.test(target)) return false;
 
-    // Запрос предиката — если заблокировано, не двигаемся
-        if (isBlocked != null && isBlocked.test(newDest)) {
-            return false; // коллизия
-        }
-    // Инициализируем движение
-        destination.set(newDest); // ставим цель
-        movementProgress = 0f; // старт прогресса
-        rotation = direction.rotation; // поворот для визуализации
-        return true; // движение началось
+        destination.set(target);
+        movementProgress = 0f;
+        lastDirection = dir;
+        return true;
     }
 
-
-    // Обновляем прогресс движения. фиксируем координаты по завершении
-    public void update(float deltaTime) {
-// Накапливаем прогресс с учётом скорости
-        movementProgress = Math.min(1f, movementProgress + deltaTime * movementSpeed);
-// Если движение завершено — фиксируем координаты
+    /** Обновление прогресса движения */
+    public void update(float delta) {
+        movementProgress = Math.min(1f, movementProgress + delta * 5f); // скорость 5
         if (movementProgress >= 1f) {
             coordinates.set(destination);
-            movementProgress = 1f; // обрезаем погрешности
+            movementProgress = 1f;
         }
     }
 
+    /** Создание пули с направлением и уроном */
+    public BulletModel createBullet(Direction dir, int damage) {
+        GridPoint2 start = coordinates.cpy().add(dir.dx, dir.dy);
+        return new BulletModel(start, dir, damage, id);
+    }
 
-    // Геттеры — необходимы для View и тестов, возврат копий
-    public GridPoint2 getCoordinates() { return new GridPoint2(coordinates); } // возвращаем копию — защищаем внутреннее состояние
-    public GridPoint2 getDestination() { return new GridPoint2(destination); } // копия
-    public float getMovementProgress() { return movementProgress; }
-    public float getRotation() { return rotation; }
+    /** Создание пули по умолчанию (lastDirection, 20 урона) */
+    public BulletModel createBullet() {
+        return createBullet(lastDirection, 20);
+    }
+
+    @Override public String getId() { return id; }
+    @Override public ObjectType getType() { return ObjectType.TANK; }
+    @Override public boolean isRemovable() { return health <= 0; }
+
+    @Override
+    public void live(float delta) { update(delta); }
 }

@@ -15,6 +15,6 @@ public class MoveCommand implements Command {
 
     @Override
     public void execute() {
-        tank.requestMove(direction, world::isBlocked);
+        tank.requestMove(direction, pos -> world.isBlocked(pos, tank));
     }
 }
