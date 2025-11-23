@@ -18,12 +18,11 @@ public class GameField {
     private final TiledMapTileLayer groundLayer;
     private final TileMovement movement;
 
-    private final Batch mapBatch = new SpriteBatch();  // <-- ВАЖНО!!!
+    private final Batch mapBatch = new SpriteBatch();
 
-    public GameField(Batch ignored) {
+    // БЕЗ параметров
+    public GameField() {
         level = new TmxMapLoader().load("level.tmx");
-
-        // создаём renderer с ОТДЕЛЬНЫМ batch
         renderer = createSingleLayerMapRenderer(level, mapBatch);
 
         groundLayer = getSingleLayer(level);
@@ -39,11 +38,11 @@ public class GameField {
     }
 
     public void render() {
-        renderer.render();  // рисует только tilemap
+        renderer.render();
     }
 
     public void dispose() {
         level.dispose();
-        mapBatch.dispose();  // <-- важно
+        mapBatch.dispose();
     }
 }

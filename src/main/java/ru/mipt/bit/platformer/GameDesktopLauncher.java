@@ -5,17 +5,15 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration;
 import com.badlogic.gdx.graphics.g2d.Batch;
-import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.maps.tiled.TiledMapTileLayer;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import ru.mipt.bit.platformer.commands.MoveCommand;
 import ru.mipt.bit.platformer.commands.ShootCommand;
+import ru.mipt.bit.platformer.config.GameConfig;
 import ru.mipt.bit.platformer.graphics.*;
-import ru.mipt.bit.platformer.keyboard.GdxKeyboardListener;
 import ru.mipt.bit.platformer.keyboard.KeyboardListener;
 import ru.mipt.bit.platformer.keyboard.RandomTankController;
-import ru.mipt.bit.platformer.levelloader.FileLevelGenerator;
 import ru.mipt.bit.platformer.levelloader.LevelGenerator;
-import ru.mipt.bit.platformer.levelloader.RandomLevelGenerator;
 import ru.mipt.bit.platformer.model.*;
 
 import java.util.ArrayList;
@@ -23,41 +21,43 @@ import java.util.List;
 
 public class GameDesktopLauncher extends ApplicationAdapter {
 
+    private AnnotationConfigApplicationContext context;
+
     private Batch batch;
     private GameField gameField;
-
     private Level level;
     private CollisionManager collisionManager;
-
     private LevelGraphics levelGraphics;
     private UIState uiState;
-
     private KeyboardListener keyboard;
-    private Tank playerTank;
 
+    private Tank playerTank;
     private final List<RandomTankController> aiControllers = new ArrayList<>();
 
     @Override
     public void create() {
-        batch = new SpriteBatch();
+        // 1. Поднимаем Spring-контекст
+        context = new AnnotationConfigApplicationContext(GameConfig.class);
 
-        // карта TMX + слой
-        gameField = new GameField(batch);
+        // 2. Получаем бины
+        batch = context.getBean(Batch.class);
+        gameField = context.getBean(GameField.class);
+        level = context.getBean(Level.class);
+        collisionManager = context.getBean(CollisionManager.class);
+        levelGraphics = context.getBean(LevelGraphics.class);
+        uiState = context.getBean(UIState.class);
+        keyboard = context.getBean(KeyboardListener.class);
+
+        // 3. Генераторы уровня
+        LevelGenerator fileGen =
+                context.getBean("fileLevelGenerator", LevelGenerator.class);
+        LevelGenerator randomGen =
+                context.getBean("randomLevelGenerator", LevelGenerator.class);
+
+        // 4. Ground layer
         TiledMapTileLayer groundLayer = gameField.getGroundLayer();
 
-        // логический уровень
-        level = new Level();
-
-        // УСТАНАВЛИВАЕМ РАЗМЕРЫ УРОВНЯ ПО КАРТЕ !!!
-        int mapWidth  = groundLayer.getWidth();   // количество тайлов по X
-        int mapHeight = groundLayer.getHeight();  // количество тайлов по Y
-        level.setBounds(mapWidth, mapHeight);
-
-        // графический уровень
-        levelGraphics = new LevelGraphics();
-        uiState = new UIState();
-
-        // Подписываемся на события создания/удаления объектов
+        // 5. Подписываемся на создание объектов
         level.addListener(Tank.class,
                 new OnNewTankGraphicsObserver(levelGraphics, batch, groundLayer));
 
@@ -77,22 +77,12 @@ public class GameDesktopLauncher extends ApplicationAdapter {
             }
         });
 
-        // --- генерация уровня ---
-
-        // 1) фиксированная часть из файла
-        LevelGenerator fileGen = new FileLevelGenerator("level.txt");
+        // 6. Генерация уровня
         fileGen.generate(level);
-
-        // 2) случайные враги – используем размеры карты!
-        int enemyCount = 3;
-        LevelGenerator randomGen =
-                new RandomLevelGenerator(mapWidth, mapHeight, enemyCount);
         randomGen.generate(level);
-
-        // применяем добавленные объекты и создаём им графику
         level.applyPendingChanges();
 
-        // находим игрока (первый танк из файла)
+        // 7. Находим танк игрока
         for (GameObject obj : level.getObjects()) {
             if (obj instanceof Tank) {
                 playerTank = (Tank) obj;
@@ -100,17 +90,14 @@ public class GameDesktopLauncher extends ApplicationAdapter {
             }
         }
 
-        // AI для остальных танков
+        // 8. AI для остальных танков
         for (GameObject obj : level.getObjects()) {
             if (obj instanceof Tank && obj != playerTank) {
                 aiControllers.add(new RandomTankController((Tank) obj, level));
             }
         }
 
-        collisionManager = new CollisionManager(level);
-
-        // управление игроком
-        keyboard = new GdxKeyboardListener();
+        // 9. Биндим команды на клавиатуру
         keyboard.bindMoveUp(new MoveCommand(playerTank, Direction.UP, level));
         keyboard.bindMoveDown(new MoveCommand(playerTank, Direction.DOWN, level));
         keyboard.bindMoveLeft(new MoveCommand(playerTank, Direction.LEFT, level));
@@ -124,18 +111,15 @@ public class GameDesktopLauncher extends ApplicationAdapter {
     public void render() {
         float dt = Gdx.graphics.getDeltaTime();
 
-        // 1–2. команды от игрока и ИИ
         keyboard.update();
         for (RandomTankController ai : aiControllers) {
             ai.updateRandom();
         }
 
-        // 3. логика
         level.update(dt);
         collisionManager.resolve();
         level.applyPendingChanges();
 
-        // 4. отрисовка
         gameField.render();
         batch.begin();
         levelGraphics.renderAll();
@@ -147,6 +131,10 @@ public class GameDesktopLauncher extends ApplicationAdapter {
         batch.dispose();
         gameField.dispose();
         levelGraphics.disposeAll();
+
+        if (context != null) {
+            context.close();
+        }
     }
 
     public static void main(String[] args) {
