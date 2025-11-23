@@ -1,179 +1,158 @@
 package ru.mipt.bit.platformer;
 
-import com.badlogic.gdx.ApplicationListener;
+import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration;
 import com.badlogic.gdx.graphics.g2d.Batch;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
-import com.badlogic.gdx.math.GridPoint2;
-import ru.mipt.bit.platformer.input.InputHandler;
-import ru.mipt.bit.platformer.input.StandardTankController;
-import ru.mipt.bit.platformer.input.TankController;
+import com.badlogic.gdx.maps.tiled.TiledMapTileLayer;
+import ru.mipt.bit.platformer.commands.MoveCommand;
+import ru.mipt.bit.platformer.commands.ShootCommand;
+import ru.mipt.bit.platformer.graphics.*;
+import ru.mipt.bit.platformer.keyboard.GdxKeyboardListener;
+import ru.mipt.bit.platformer.keyboard.KeyboardListener;
+import ru.mipt.bit.platformer.keyboard.RandomTankController;
+import ru.mipt.bit.platformer.levelloader.FileLevelGenerator;
+import ru.mipt.bit.platformer.levelloader.LevelGenerator;
+import ru.mipt.bit.platformer.levelloader.RandomLevelGenerator;
 import ru.mipt.bit.platformer.model.*;
-import ru.mipt.bit.platformer.view.TankView;
-import ru.mipt.bit.platformer.view.TankViewWithHealth;
-import ru.mipt.bit.platformer.view.TreeView;
-import ru.mipt.bit.platformer.input.RandomTankController;
-import java.util.*;
 
-/**
- * Главный класс запуска игры.
- * Разделяет:
- * - графику (View)
- * - игровую логику (Model)
- * - ввод (InputHandler + Controller)
- */
-public class GameDesktopLauncher implements ApplicationListener {
+import java.util.ArrayList;
+import java.util.List;
 
-    private Batch batch;                 // для отрисовки
-    private GameField gameField;         // карта уровня
-    private TankModel tankModel;         // логика танка
-    private TankView tankView;           // отрисовка танка
-    private InputHandler inputHandler;   // система ввода
-    private List<TreeView> treeViews;
-    private List<RandomTankController> aiControllers;
-    private boolean showHealthBars = false;
-    private GameWorld world;
+public class GameDesktopLauncher extends ApplicationAdapter {
 
+    private Batch batch;
+    private GameField gameField;
 
-    // Реализация проверки коллизий
-    private static class SimpleCollisionChecker implements CollisionChecker {
-        private final List<Obstacle> obstacles;
-        public SimpleCollisionChecker(List<Obstacle> obstacles) {
-            this.obstacles = obstacles;
-        }
-        @Override
-        public boolean isBlocked(GridPoint2 position) {
-            return obstacles.stream().anyMatch(o -> o.getCoordinates().equals(position));
-        }
-    }
+    private Level level;
+    private CollisionManager collisionManager;
+
+    private LevelGraphics levelGraphics;
+    private UIState uiState;
+
+    private KeyboardListener keyboard;
+    private Tank playerTank;
+
+    private final List<RandomTankController> aiControllers = new ArrayList<>();
 
     @Override
     public void create() {
         batch = new SpriteBatch();
+
+        // карта TMX + слой
         gameField = new GameField(batch);
+        TiledMapTileLayer groundLayer = gameField.getGroundLayer();
 
-        LevelLoader loader = new LevelLoader(10, 8);
-        LevelLoader.LevelData levelData;
+        // логический уровень
+        level = new Level();
 
-        try {
-            boolean useFile = true; // true — из файла, false — случайно
-            if (useFile) {
-                levelData = loader.loadFromFile("level.txt");
-            } else {
-                levelData = loader.generateRandom(8);
+        // УСТАНАВЛИВАЕМ РАЗМЕРЫ УРОВНЯ ПО КАРТЕ !!!
+        int mapWidth  = groundLayer.getWidth();   // количество тайлов по X
+        int mapHeight = groundLayer.getHeight();  // количество тайлов по Y
+        level.setBounds(mapWidth, mapHeight);
+
+        // графический уровень
+        levelGraphics = new LevelGraphics();
+        uiState = new UIState();
+
+        // Подписываемся на события создания/удаления объектов
+        level.addListener(Tank.class,
+                new OnNewTankGraphicsObserver(levelGraphics, batch, groundLayer));
+
+        level.addListener(Bullet.class,
+                new OnShootingObserver(levelGraphics, batch, groundLayer));
+
+        level.addListener(Tree.class, new Observer<Tree>() {
+            @Override
+            public void onCreated(Tree tree) {
+                levelGraphics.add(tree.getId(),
+                        new TreeGraphics(tree, batch, groundLayer));
             }
-        } catch (Exception e) {
-            throw new RuntimeException("Ошибка при загрузке уровня", e);
-        }
-        world = new GameWorld(levelData.obstacles, loader.getWidth(), loader.getHeight());
 
-        // Создаём танк игрока
-        tankModel = new TankModel(levelData.playerStart, 5f);
+            @Override
+            public void onRemoved(Tree tree) {
+                levelGraphics.remove(tree.getId());
+            }
+        });
 
+        // --- генерация уровня ---
 
-        world.addTank(tankModel);
-        tankView = new TankView(tankModel, batch, gameField.getMovement());
+        // 1) фиксированная часть из файла
+        LevelGenerator fileGen = new FileLevelGenerator("level.txt");
+        fileGen.generate(level);
 
-        // Создаём несколько AI-танков
-        aiControllers = new ArrayList<>();
+        // 2) случайные враги – используем размеры карты!
+        int enemyCount = 3;
+        LevelGenerator randomGen =
+                new RandomLevelGenerator(mapWidth, mapHeight, enemyCount);
+        randomGen.generate(level);
 
-        Random rand = new Random();
-        for (int i = 0; i < 3; i++) { // три ИИ-танка
-            GridPoint2 pos;
-            do {
-                pos = new GridPoint2(rand.nextInt(loader.getWidth()), rand.nextInt(loader.getHeight()));
-            } while (world.isBlocked(pos, null));
-            TankModel aiTank = new TankModel(pos, 5f);
-            world.addTank(aiTank);
-            aiControllers.add(new RandomTankController(aiTank, world));
-        }
+        // применяем добавленные объекты и создаём им графику
+        level.applyPendingChanges();
 
-
-            // Создаём TreeView для всех деревьев
-        treeViews = new ArrayList<>();
-        for (Obstacle o : levelData.obstacles) {
-            TreeModel tree = (TreeModel) o;
-            treeViews.add(new TreeView(tree, batch, gameField.getGroundLayer()));
+        // находим игрока (первый танк из файла)
+        for (GameObject obj : level.getObjects()) {
+            if (obj instanceof Tank) {
+                playerTank = (Tank) obj;
+                break;
+            }
         }
 
-        // Проверка коллизий через весь мир (границы + препятствия + танки)
-        CollisionChecker collisionChecker = world::isBlocked;
+        // AI для остальных танков
+        for (GameObject obj : level.getObjects()) {
+            if (obj instanceof Tank && obj != playerTank) {
+                aiControllers.add(new RandomTankController((Tank) obj, level));
+            }
+        }
 
+        collisionManager = new CollisionManager(level);
 
-        // Настройка ввода
-        inputHandler = new InputHandler();
-        TankController controller = new StandardTankController(tankModel, collisionChecker);
-        controller.registerControls(inputHandler);
+        // управление игроком
+        keyboard = new GdxKeyboardListener();
+        keyboard.bindMoveUp(new MoveCommand(playerTank, Direction.UP, level));
+        keyboard.bindMoveDown(new MoveCommand(playerTank, Direction.DOWN, level));
+        keyboard.bindMoveLeft(new MoveCommand(playerTank, Direction.LEFT, level));
+        keyboard.bindMoveRight(new MoveCommand(playerTank, Direction.RIGHT, level));
+        keyboard.bindShoot(new ShootCommand(playerTank, level, 20));
+        keyboard.bindToggleHealth(new ToggleHealthCommand(
+                uiState, levelGraphics, level, batch, groundLayer));
     }
 
     @Override
     public void render() {
-        // очищаем экран
-        Gdx.gl.glClearColor(0f, 0f, 0.2f, 1f);
-        Gdx.gl.glClear(com.badlogic.gdx.graphics.GL20.GL_COLOR_BUFFER_BIT);
+        float dt = Gdx.graphics.getDeltaTime();
 
-        // время между кадрами
-        float deltaTime = Gdx.graphics.getDeltaTime();
-
-        // собираем нажатые клавиши
-        Set<Integer> pressedKeys = new HashSet<>();
-        for (int key = 0; key < 256; key++) {
-            if (Gdx.input.isKeyPressed(key)) pressedKeys.add(key);
-        }
-        inputHandler.handlePressedKeys(pressedKeys);
-
-        if (Gdx.input.isKeyJustPressed(com.badlogic.gdx.Input.Keys.L)) {
-            showHealthBars = !showHealthBars;
-        }
-
-        // обновляем логику танка
-        tankModel.update(deltaTime);
+        // 1–2. команды от игрока и ИИ
+        keyboard.update();
         for (RandomTankController ai : aiControllers) {
-            ai.update(deltaTime);
+            ai.updateRandom();
         }
-        // рисуем карту
+
+        // 3. логика
+        level.update(dt);
+        collisionManager.resolve();
+        level.applyPendingChanges();
+
+        // 4. отрисовка
         gameField.render();
-
-        //  начинаем batch ДО всех render()
         batch.begin();
-
-        // рисуем деревья
-        for (TreeView tv : treeViews) tv.render();
-
-        // рисуем танки
-        for (TankModel t : world.getTanks()) {
-            if (showHealthBars) {
-                new TankViewWithHealth(t, batch, gameField.getMovement()).render();
-            } else {
-                new TankView(t, batch, gameField.getMovement()).render();
-            }
-        }
-
+        levelGraphics.renderAll();
         batch.end();
     }
 
     @Override
-    public void resize(int width, int height) {}
-
-    @Override
-    public void pause() {}
-
-    @Override
-    public void resume() {}
-
-    @Override
     public void dispose() {
-        for (TreeView tv : treeViews) tv.dispose(); // корректная очистка всех деревьев
-        tankView.dispose();
-        gameField.dispose();
         batch.dispose();
+        gameField.dispose();
+        levelGraphics.disposeAll();
     }
 
     public static void main(String[] args) {
-        Lwjgl3ApplicationConfiguration config = new Lwjgl3ApplicationConfiguration();
-        config.setWindowedMode(1280, 1024);
-        new Lwjgl3Application(new GameDesktopLauncher(), config);
+        Lwjgl3ApplicationConfiguration cfg = new Lwjgl3ApplicationConfiguration();
+        cfg.setWindowedMode(1280, 720);
+        cfg.setTitle("Platformer");
+        new Lwjgl3Application(new GameDesktopLauncher(), cfg);
     }
 }

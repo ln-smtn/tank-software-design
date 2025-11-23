@@ -2,6 +2,7 @@ package ru.mipt.bit.platformer.input;
 
 // JUnit аннотации
 import org.junit.jupiter.api.Test;
+import ru.mipt.bit.platformer.keyboard.InputHandler;
 
 // Коллекции Java
 import java.util.HashSet;
