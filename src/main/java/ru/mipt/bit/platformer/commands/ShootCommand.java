@@ -1,31 +1,31 @@
 package ru.mipt.bit.platformer.commands;
 
-import ru.mipt.bit.platformer.model.BulletModel;
+import com.badlogic.gdx.math.GridPoint2;
+import ru.mipt.bit.platformer.model.Bullet;
 import ru.mipt.bit.platformer.model.Direction;
-import ru.mipt.bit.platformer.model.GameWorld;
-import ru.mipt.bit.platformer.model.TankModel;
+import ru.mipt.bit.platformer.model.Level;
+import ru.mipt.bit.platformer.model.Tank;
 
-/**
- * Команда "стрелять": просит танк создать пулю и регистрирует пулю в GameWorld.
- */
 public class ShootCommand implements Command {
-    private final TankModel tank;
-    private final Direction direction;
-    private final GameWorld world;
+
+    private final Tank tank;
+    private final Level level;
     private final int damage;
 
-    public ShootCommand(TankModel tank, Direction direction, GameWorld world, int damage) {
+    public ShootCommand(Tank tank, Level level, int damage) {
         this.tank = tank;
-        this.direction = direction;
-        this.world = world;
+        this.level = level;
         this.damage = damage;
     }
 
     @Override
     public void execute() {
-        BulletModel bullet = tank.createBullet(direction, damage);
-        if (bullet != null) {
-            world.enqueueAdd(bullet);
-        }
+        Direction dir = tank.getDirection();
+
+        // ПУЛЯ СТАРТУЕТ ИЗ КЛЕТКИ ТАНКА
+        GridPoint2 start = tank.getPosition();
+
+        Bullet bullet = new Bullet(start, dir, damage, tank);
+        level.addObject(bullet);
     }
 }

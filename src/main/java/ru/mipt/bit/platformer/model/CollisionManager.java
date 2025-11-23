@@ -1,23 +1,45 @@
 package ru.mipt.bit.platformer.model;
 
 public class CollisionManager {
-    private final GameWorld world;
 
-    public CollisionManager(GameWorld world) { this.world = world; }
+    private final Level level;
 
-    public void resolveCollisions() {
-        for (WorldObject obj : world.getObjects()) {
-            if (obj.getType() == ObjectType.BULLET) {
-                BulletModel bullet = (BulletModel) obj;
-                for (WorldObject target : world.getObjects()) {
-                    if (target.getId().equals(bullet.getOwnerId())) continue;
-                    if (target.getCoordinates().equals(bullet.getCoordinates())) {
-                        bullet.markRemoved();
-                        if (target.getType() == ObjectType.TANK) {
-                            ((TankModel) target).takeDamage(bullet.getDamage());
-                        }
+    public CollisionManager(Level level) {
+        this.level = level;
+    }
+
+    public void resolve() {
+        for (GameObject obj : level.getObjects()) {
+            if (obj.getType() != ObjectType.BULLET) {
+                continue;
+            }
+
+            Bullet bullet = (Bullet) obj;
+
+            // улетела за карту
+            if (level.isOutOfBounds(bullet.getPosition())) {
+                bullet.markRemoved();
+                continue;
+            }
+
+            for (GameObject target : level.getObjects()) {
+                if (target == bullet.getOwner()) continue;
+
+                if (!target.getPosition().equals(bullet.getPosition())) continue;
+
+                // есть столкновение
+                bullet.markRemoved();
+
+                if (target.getType() == ObjectType.TANK) {
+                    Tank t = (Tank) target;
+                    t.damage(bullet.getDamage());
+                    if (t.isRemovable()) {
+                        level.removeObject(t);
                     }
+                } else if (target.getType() == ObjectType.BULLET) {
+                    ((Bullet) target).markRemoved();
                 }
+                // дерево / другое — просто исчезает пуля
             }
         }
     }

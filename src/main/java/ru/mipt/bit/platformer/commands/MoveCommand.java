@@ -1,20 +1,23 @@
 package ru.mipt.bit.platformer.commands;
 
-import ru.mipt.bit.platformer.model.*;
+import ru.mipt.bit.platformer.model.Direction;
+import ru.mipt.bit.platformer.model.Level;
+import ru.mipt.bit.platformer.model.Tank;
 
 public class MoveCommand implements Command {
-    private final TankModel tank;
-    private final Direction direction;
-    private final GameWorld world;
 
-    public MoveCommand(TankModel tank, Direction direction, GameWorld world) {
+    private final Tank tank;
+    private final Direction direction;
+    private final Level level;
+
+    public MoveCommand(Tank tank, Direction direction, Level level) {
         this.tank = tank;
         this.direction = direction;
-        this.world = world;
+        this.level = level;
     }
 
     @Override
     public void execute() {
-        tank.requestMove(direction, pos -> world.isBlocked(pos, tank));
+        tank.requestMove(direction, level);
     }
 }

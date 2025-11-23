@@ -3,13 +3,16 @@ package ru.mipt.bit.platformer.model;
 import java.util.Random;
 
 public enum Direction {
-    UP(0,1,0f),
-    DOWN(0,-1,180f),
-    LEFT(-1,0,270f),
-    RIGHT(1,0,90f);
+    UP(0, 1, 90f),
+    DOWN(0, -1, 270f),
+    LEFT(-1, 0, 180f),
+    RIGHT(1, 0, 0f);
 
-    public final int dx, dy;
-    public final float rotation;
+    private static final Random RANDOM = new Random();
+
+    public final int dx;
+    public final int dy;
+    private final float rotation;
 
     Direction(int dx, int dy, float rotation) {
         this.dx = dx;
@@ -17,7 +20,12 @@ public enum Direction {
         this.rotation = rotation;
     }
 
-    private static final Direction[] VALUES = values();
-    private static final Random RANDOM = new Random();
-    public static Direction random() { return VALUES[RANDOM.nextInt(VALUES.length)]; }
+    public float getRotation() {
+        return rotation;
+    }
+
+    public static Direction random() {
+        Direction[] values = values();
+        return values[RANDOM.nextInt(values.length)];
+    }
 }

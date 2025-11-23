@@ -1,114 +1,158 @@
 package ru.mipt.bit.platformer;
 
-import com.badlogic.gdx.ApplicationListener;
+import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
-import com.badlogic.gdx.backends.lwjgl3.*;
+import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
+import com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration;
 import com.badlogic.gdx.graphics.g2d.Batch;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
-import com.badlogic.gdx.math.GridPoint2;
-
-import ru.mipt.bit.platformer.input.*;
+import com.badlogic.gdx.maps.tiled.TiledMapTileLayer;
+import ru.mipt.bit.platformer.commands.MoveCommand;
+import ru.mipt.bit.platformer.commands.ShootCommand;
+import ru.mipt.bit.platformer.graphics.*;
+import ru.mipt.bit.platformer.keyboard.GdxKeyboardListener;
+import ru.mipt.bit.platformer.keyboard.KeyboardListener;
+import ru.mipt.bit.platformer.keyboard.RandomTankController;
+import ru.mipt.bit.platformer.levelloader.FileLevelGenerator;
+import ru.mipt.bit.platformer.levelloader.LevelGenerator;
+import ru.mipt.bit.platformer.levelloader.RandomLevelGenerator;
 import ru.mipt.bit.platformer.model.*;
-import ru.mipt.bit.platformer.view.LevelViewObserver;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
 
-public class GameDesktopLauncher implements ApplicationListener {
+public class GameDesktopLauncher extends ApplicationAdapter {
 
     private Batch batch;
     private GameField gameField;
-    private InputHandler inputHandler;
-    private GameWorld world;
+
+    private Level level;
     private CollisionManager collisionManager;
-    private LevelViewObserver levelViewObserver;
-    private TankModel playerTank;
-    private List<RandomTankController> aiControllers;
+
+    private LevelGraphics levelGraphics;
+    private UIState uiState;
+
+    private KeyboardListener keyboard;
+    private Tank playerTank;
+
+    private final List<RandomTankController> aiControllers = new ArrayList<>();
 
     @Override
     public void create() {
-        // --- Инициализация графики ---
         batch = new SpriteBatch();
+
+        // карта TMX + слой
         gameField = new GameField(batch);
+        TiledMapTileLayer groundLayer = gameField.getGroundLayer();
 
-        // --- Загрузка уровня ---
-        LevelLoader loader = new LevelLoader(10, 8);
-        LevelLoader.LevelData levelData;
-        try {
-            levelData = loader.loadFromFile("level.txt");
-        } catch (java.io.IOException e) {
-            throw new RuntimeException("Ошибка загрузки уровня", e);
+        // логический уровень
+        level = new Level();
+
+        // УСТАНАВЛИВАЕМ РАЗМЕРЫ УРОВНЯ ПО КАРТЕ !!!
+        int mapWidth  = groundLayer.getWidth();   // количество тайлов по X
+        int mapHeight = groundLayer.getHeight();  // количество тайлов по Y
+        level.setBounds(mapWidth, mapHeight);
+
+        // графический уровень
+        levelGraphics = new LevelGraphics();
+        uiState = new UIState();
+
+        // Подписываемся на события создания/удаления объектов
+        level.addListener(Tank.class,
+                new OnNewTankGraphicsObserver(levelGraphics, batch, groundLayer));
+
+        level.addListener(Bullet.class,
+                new OnShootingObserver(levelGraphics, batch, groundLayer));
+
+        level.addListener(Tree.class, new Observer<Tree>() {
+            @Override
+            public void onCreated(Tree tree) {
+                levelGraphics.add(tree.getId(),
+                        new TreeGraphics(tree, batch, groundLayer));
+            }
+
+            @Override
+            public void onRemoved(Tree tree) {
+                levelGraphics.remove(tree.getId());
+            }
+        });
+
+        // --- генерация уровня ---
+
+        // 1) фиксированная часть из файла
+        LevelGenerator fileGen = new FileLevelGenerator("level.txt");
+        fileGen.generate(level);
+
+        // 2) случайные враги – используем размеры карты!
+        int enemyCount = 3;
+        LevelGenerator randomGen =
+                new RandomLevelGenerator(mapWidth, mapHeight, enemyCount);
+        randomGen.generate(level);
+
+        // применяем добавленные объекты и создаём им графику
+        level.applyPendingChanges();
+
+        // находим игрока (первый танк из файла)
+        for (GameObject obj : level.getObjects()) {
+            if (obj instanceof Tank) {
+                playerTank = (Tank) obj;
+                break;
+            }
         }
 
-        // --- Создание игрового мира (только логика, без графики) ---
-        world = new GameWorld();
-
-        // --- Игрок ---
-        playerTank = new TankModel(levelData.playerStart);
-        world.enqueueAdd(playerTank);
-
-        // --- AI танки ---
-        aiControllers = new ArrayList<>();
-        Random r = new Random();
-        for (int i = 0; i < 3; i++) {
-            GridPoint2 pos;
-            do {
-                pos = new GridPoint2(r.nextInt(loader.getWidth()), r.nextInt(loader.getHeight()));
-            } while (world.isBlocked(pos, null));
-            TankModel ai = new TankModel(pos);
-            world.enqueueAdd(ai);
-            aiControllers.add(new RandomTankController(ai, world));
+        // AI для остальных танков
+        for (GameObject obj : level.getObjects()) {
+            if (obj instanceof Tank && obj != playerTank) {
+                aiControllers.add(new RandomTankController((Tank) obj, level));
+            }
         }
 
-        // --- Применяем добавленные объекты ---
-        world.applyPendingChanges();
+        collisionManager = new CollisionManager(level);
 
-        // --- Графический уровень (View) ---
-        // LevelViewObserver только читает состояние моделей, не меняет их
-        levelViewObserver = new LevelViewObserver(batch);
-        world.addObserver(levelViewObserver);
-
-        // --- Управление столкновениями ---
-        collisionManager = new CollisionManager(world);
-
-        // --- Ввод игрока ---
-        inputHandler = new InputHandler();
-        new StandardTankController(playerTank, world).registerControls(inputHandler);
+        // управление игроком
+        keyboard = new GdxKeyboardListener();
+        keyboard.bindMoveUp(new MoveCommand(playerTank, Direction.UP, level));
+        keyboard.bindMoveDown(new MoveCommand(playerTank, Direction.DOWN, level));
+        keyboard.bindMoveLeft(new MoveCommand(playerTank, Direction.LEFT, level));
+        keyboard.bindMoveRight(new MoveCommand(playerTank, Direction.RIGHT, level));
+        keyboard.bindShoot(new ShootCommand(playerTank, level, 20));
+        keyboard.bindToggleHealth(new ToggleHealthCommand(
+                uiState, levelGraphics, level, batch, groundLayer));
     }
 
     @Override
     public void render() {
         float dt = Gdx.graphics.getDeltaTime();
 
-        // --- Логика: обновление мира ---
-        world.updateAll(dt);
-
-        // --- AI танки ---
+        // 1–2. команды от игрока и ИИ
+        keyboard.update();
         for (RandomTankController ai : aiControllers) {
             ai.updateRandom();
         }
 
-        // --- Решение коллизий ---
-        collisionManager.resolveCollisions();
-        world.applyPendingChanges();
+        // 3. логика
+        level.update(dt);
+        collisionManager.resolve();
+        level.applyPendingChanges();
 
-        // --- Рендер ---
-        gameField.render();          // фон и тайлы
+        // 4. отрисовка
+        gameField.render();
         batch.begin();
-        levelViewObserver.renderAll(); // рисует только View объектов
+        levelGraphics.renderAll();
         batch.end();
     }
 
-    @Override public void resize(int w, int h) {}
-    @Override public void pause() {}
-    @Override public void resume() {}
-    @Override public void dispose() {
-        gameField.dispose();
+    @Override
+    public void dispose() {
         batch.dispose();
+        gameField.dispose();
+        levelGraphics.disposeAll();
     }
 
     public static void main(String[] args) {
         Lwjgl3ApplicationConfiguration cfg = new Lwjgl3ApplicationConfiguration();
         cfg.setWindowedMode(1280, 720);
+        cfg.setTitle("Platformer");
         new Lwjgl3Application(new GameDesktopLauncher(), cfg);
     }
 }
