@@ -20,18 +20,14 @@ public class ShootCommand implements Command {
 
     @Override
     public void execute() {
-        // 1. если танк уже мёртв/удалён — не стреляем
-        if (tank.isRemovable()) {
-            return;
-        }
+        if (tank == null || level == null) return;
+        if (tank.isRemovable()) return;
 
-        // 2. направление ствола
         Direction dir = tank.getDirection();
 
-        // 3. пуля стартует ИЗ КЛЕТКИ ТАНКА
+
         GridPoint2 start = tank.getPosition();
 
-        // 4. создаём пулю и добавляем в уровень
         Bullet bullet = new Bullet(start, dir, damage, tank);
         level.addObject(bullet);
     }

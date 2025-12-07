@@ -5,121 +5,86 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration;
 import com.badlogic.gdx.graphics.g2d.Batch;
+import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.maps.tiled.TiledMapTileLayer;
-import org.springframework.context.annotation.AnnotationConfigApplicationContext;
-import ru.mipt.bit.platformer.commands.MoveCommand;
-import ru.mipt.bit.platformer.commands.ShootCommand;
-import ru.mipt.bit.platformer.config.GameConfig;
-import ru.mipt.bit.platformer.graphics.*;
+
+import ru.mipt.bit.platformer.commands.PlayerCommands;
+import ru.mipt.bit.platformer.graphics.GraphicsInitResult;
 import ru.mipt.bit.platformer.keyboard.KeyboardListener;
 import ru.mipt.bit.platformer.keyboard.RandomTankController;
-import ru.mipt.bit.platformer.levelloader.LevelGenerator;
-import ru.mipt.bit.platformer.model.*;
+import ru.mipt.bit.platformer.levelloader.LevelInitResult;
+import ru.mipt.bit.platformer.model.CollisionManager;
+import ru.mipt.bit.platformer.model.Level;
+import ru.mipt.bit.platformer.model.Tank;
 
 import java.util.ArrayList;
 import java.util.List;
 
 public class GameDesktopLauncher extends ApplicationAdapter {
 
-    private AnnotationConfigApplicationContext context;
+    private final Config config = new Config();
 
     private Batch batch;
     private GameField gameField;
+
     private Level level;
     private CollisionManager collisionManager;
-    private LevelGraphics levelGraphics;
-    private UIState uiState;
-    private KeyboardListener keyboard;
 
+    private ru.mipt.bit.platformer.graphics.LevelGraphics levelGraphics;
+    private ru.mipt.bit.platformer.graphics.UIState uiState;
+
+    private KeyboardListener keyboard;
     private Tank playerTank;
-    private final List<RandomTankController> aiControllers = new ArrayList<>();
+
+    private List<RandomTankController> aiControllers = new ArrayList<>();
 
     @Override
     public void create() {
-        // 1. Поднимаем Spring-контекст
-        context = new AnnotationConfigApplicationContext(GameConfig.class);
+        batch = new SpriteBatch();
 
-        // 2. Получаем бины
-        batch = context.getBean(Batch.class);
-        gameField = context.getBean(GameField.class);
-        level = context.getBean(Level.class);
-        collisionManager = context.getBean(CollisionManager.class);
-        levelGraphics = context.getBean(LevelGraphics.class);
-        uiState = context.getBean(UIState.class);
-        keyboard = context.getBean(KeyboardListener.class);
-
-        // 3. Генераторы уровня
-        LevelGenerator fileGen =
-                context.getBean("fileLevelGenerator", LevelGenerator.class);
-        LevelGenerator randomGen =
-                context.getBean("randomLevelGenerator", LevelGenerator.class);
-
-        // 4. Ground layer
+        // карта
+        gameField = new GameField();
         TiledMapTileLayer groundLayer = gameField.getGroundLayer();
 
-        // 5. Подписываемся на создание объектов
-        level.addListener(Tank.class,
-                new OnNewTankGraphicsObserver(levelGraphics, batch, groundLayer));
+        // 1) initializeLevel (в levelloader)
+        LevelInitResult levelInit = config.initializeLevel(groundLayer);
+        level = levelInit.getLevel();
+        playerTank = levelInit.getPlayerTank();
+        aiControllers = levelInit.getAiControllers();
 
-        level.addListener(Bullet.class,
-                new OnShootingObserver(levelGraphics, batch, groundLayer));
+        // 2) initializeGraphics (в graphics)
+        GraphicsInitResult gfxInit = config.initializeGraphics(level, batch, groundLayer);
+        levelGraphics = gfxInit.getLevelGraphics();
+        uiState = gfxInit.getUiState();
 
-        level.addListener(Tree.class, new Observer<Tree>() {
-            @Override
-            public void onCreated(Tree tree) {
-                levelGraphics.add(tree.getId(),
-                        new TreeGraphics(tree, batch, groundLayer));
-            }
+        // 3) createCommands (в commands)
+        PlayerCommands commands = config.createCommands(
+                playerTank, level, levelGraphics, uiState, batch, groundLayer
+        );
 
-            @Override
-            public void onRemoved(Tree tree) {
-                levelGraphics.remove(tree.getId());
-            }
-        });
+        // 4) initializeKeyboard (в keyboard)
+        keyboard = config.initializeKeyboard(commands);
 
-        // 6. Генерация уровня
-        fileGen.generate(level);
-        randomGen.generate(level);
-        level.applyPendingChanges();
-
-        // 7. Находим танк игрока
-        for (GameObject obj : level.getObjects()) {
-            if (obj instanceof Tank) {
-                playerTank = (Tank) obj;
-                break;
-            }
-        }
-
-        // 8. AI для остальных танков
-        for (GameObject obj : level.getObjects()) {
-            if (obj instanceof Tank && obj != playerTank) {
-                aiControllers.add(new RandomTankController((Tank) obj, level));
-            }
-        }
-
-        // 9. Биндим команды на клавиатуру
-        keyboard.bindMoveUp(new MoveCommand(playerTank, Direction.UP, level));
-        keyboard.bindMoveDown(new MoveCommand(playerTank, Direction.DOWN, level));
-        keyboard.bindMoveLeft(new MoveCommand(playerTank, Direction.LEFT, level));
-        keyboard.bindMoveRight(new MoveCommand(playerTank, Direction.RIGHT, level));
-        keyboard.bindShoot(new ShootCommand(playerTank, level, 20));
-        keyboard.bindToggleHealth(new ToggleHealthCommand(
-                uiState, levelGraphics, level, batch, groundLayer));
+        // сервис логики столкновений
+        collisionManager = new CollisionManager(level);
     }
 
     @Override
     public void render() {
         float dt = Gdx.graphics.getDeltaTime();
 
+        // 1–2. команды игрока + ИИ
         keyboard.update();
         for (RandomTankController ai : aiControllers) {
             ai.updateRandom();
         }
 
+        // 3. логика
         level.update(dt);
         collisionManager.resolve();
         level.applyPendingChanges();
 
+        // 4. отрисовка
         gameField.render();
         batch.begin();
         levelGraphics.renderAll();
@@ -131,10 +96,6 @@ public class GameDesktopLauncher extends ApplicationAdapter {
         batch.dispose();
         gameField.dispose();
         levelGraphics.disposeAll();
-
-        if (context != null) {
-            context.close();
-        }
     }
 
     public static void main(String[] args) {

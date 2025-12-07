@@ -42,12 +42,8 @@ public class Tank implements GameObject {
         health -= amount;
     }
 
-    // старый вариант, если где-то ещё зовётся
-    public void requestMove(Direction dir) {
-        requestMove(dir, null);
-    }
 
-    // новый: через Level – чтобы не заезжать на деревья/танки
+
     public void requestMove(Direction dir, Level level) {
         if (moveProgress < 1f) return;
 
