@@ -2,7 +2,9 @@ package ru.mipt.bit.platformer.keyboard;
 
 import ru.mipt.bit.platformer.commands.MoveCommand;
 import ru.mipt.bit.platformer.commands.ShootCommand;
-import ru.mipt.bit.platformer.model.*;
+import ru.mipt.bit.platformer.model.Direction;
+import ru.mipt.bit.platformer.model.Level;
+import ru.mipt.bit.platformer.model.Tank;
 
 import java.util.Random;
 
@@ -27,17 +29,22 @@ public class RandomTankController {
         moveLeft  = new MoveCommand(tank, Direction.LEFT, level);
         moveRight = new MoveCommand(tank, Direction.RIGHT, level);
 
-        shoot = new ShootCommand(tank, level, 10); // урон бота – по вкусу
+        shoot = new ShootCommand(tank, level, 10);
     }
 
     public void updateRandom() {
+        // если танк уже уничтожен — больше его не двигаем и не стреляем
+        if (tank.isRemovable()) {
+            return;
+        }
+
         // иногда двигаемся
         if (random.nextFloat() < 0.05f) {
             Direction dir = Direction.random();
             switch (dir) {
-                case UP:    moveUp.execute(); break;
-                case DOWN:  moveDown.execute(); break;
-                case LEFT:  moveLeft.execute(); break;
+                case UP:    moveUp.execute();    break;
+                case DOWN:  moveDown.execute();  break;
+                case LEFT:  moveLeft.execute();  break;
                 case RIGHT: moveRight.execute(); break;
             }
         }

@@ -7,21 +7,22 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration;
 import com.badlogic.gdx.graphics.g2d.Batch;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.maps.tiled.TiledMapTileLayer;
-import ru.mipt.bit.platformer.commands.MoveCommand;
-import ru.mipt.bit.platformer.commands.ShootCommand;
-import ru.mipt.bit.platformer.graphics.*;
-import ru.mipt.bit.platformer.keyboard.GdxKeyboardListener;
+
+import ru.mipt.bit.platformer.commands.PlayerCommands;
+import ru.mipt.bit.platformer.graphics.GraphicsInitResult;
 import ru.mipt.bit.platformer.keyboard.KeyboardListener;
 import ru.mipt.bit.platformer.keyboard.RandomTankController;
-import ru.mipt.bit.platformer.levelloader.FileLevelGenerator;
-import ru.mipt.bit.platformer.levelloader.LevelGenerator;
-import ru.mipt.bit.platformer.levelloader.RandomLevelGenerator;
-import ru.mipt.bit.platformer.model.*;
+import ru.mipt.bit.platformer.levelloader.LevelInitResult;
+import ru.mipt.bit.platformer.model.CollisionManager;
+import ru.mipt.bit.platformer.model.Level;
+import ru.mipt.bit.platformer.model.Tank;
 
 import java.util.ArrayList;
 import java.util.List;
 
 public class GameDesktopLauncher extends ApplicationAdapter {
+
+    private final Config config = new Config();
 
     private Batch batch;
     private GameField gameField;
@@ -29,102 +30,50 @@ public class GameDesktopLauncher extends ApplicationAdapter {
     private Level level;
     private CollisionManager collisionManager;
 
-    private LevelGraphics levelGraphics;
-    private UIState uiState;
+    private ru.mipt.bit.platformer.graphics.LevelGraphics levelGraphics;
+    private ru.mipt.bit.platformer.graphics.UIState uiState;
 
     private KeyboardListener keyboard;
     private Tank playerTank;
 
-    private final List<RandomTankController> aiControllers = new ArrayList<>();
+    private List<RandomTankController> aiControllers = new ArrayList<>();
 
     @Override
     public void create() {
         batch = new SpriteBatch();
 
-        // карта TMX + слой
-        gameField = new GameField(batch);
+        // карта
+        gameField = new GameField();
         TiledMapTileLayer groundLayer = gameField.getGroundLayer();
 
-        // логический уровень
-        level = new Level();
+        // 1) initializeLevel (в levelloader)
+        LevelInitResult levelInit = config.initializeLevel(groundLayer);
+        level = levelInit.getLevel();
+        playerTank = levelInit.getPlayerTank();
+        aiControllers = levelInit.getAiControllers();
 
-        // УСТАНАВЛИВАЕМ РАЗМЕРЫ УРОВНЯ ПО КАРТЕ !!!
-        int mapWidth  = groundLayer.getWidth();   // количество тайлов по X
-        int mapHeight = groundLayer.getHeight();  // количество тайлов по Y
-        level.setBounds(mapWidth, mapHeight);
+        // 2) initializeGraphics (в graphics)
+        GraphicsInitResult gfxInit = config.initializeGraphics(level, batch, groundLayer);
+        levelGraphics = gfxInit.getLevelGraphics();
+        uiState = gfxInit.getUiState();
 
-        // графический уровень
-        levelGraphics = new LevelGraphics();
-        uiState = new UIState();
+        // 3) createCommands (в commands)
+        PlayerCommands commands = config.createCommands(
+                playerTank, level, levelGraphics, uiState, batch, groundLayer
+        );
 
-        // Подписываемся на события создания/удаления объектов
-        level.addListener(Tank.class,
-                new OnNewTankGraphicsObserver(levelGraphics, batch, groundLayer));
+        // 4) initializeKeyboard (в keyboard)
+        keyboard = config.initializeKeyboard(commands);
 
-        level.addListener(Bullet.class,
-                new OnShootingObserver(levelGraphics, batch, groundLayer));
-
-        level.addListener(Tree.class, new Observer<Tree>() {
-            @Override
-            public void onCreated(Tree tree) {
-                levelGraphics.add(tree.getId(),
-                        new TreeGraphics(tree, batch, groundLayer));
-            }
-
-            @Override
-            public void onRemoved(Tree tree) {
-                levelGraphics.remove(tree.getId());
-            }
-        });
-
-        // --- генерация уровня ---
-
-        // 1) фиксированная часть из файла
-        LevelGenerator fileGen = new FileLevelGenerator("level.txt");
-        fileGen.generate(level);
-
-        // 2) случайные враги – используем размеры карты!
-        int enemyCount = 3;
-        LevelGenerator randomGen =
-                new RandomLevelGenerator(mapWidth, mapHeight, enemyCount);
-        randomGen.generate(level);
-
-        // применяем добавленные объекты и создаём им графику
-        level.applyPendingChanges();
-
-        // находим игрока (первый танк из файла)
-        for (GameObject obj : level.getObjects()) {
-            if (obj instanceof Tank) {
-                playerTank = (Tank) obj;
-                break;
-            }
-        }
-
-        // AI для остальных танков
-        for (GameObject obj : level.getObjects()) {
-            if (obj instanceof Tank && obj != playerTank) {
-                aiControllers.add(new RandomTankController((Tank) obj, level));
-            }
-        }
-
+        // сервис логики столкновений
         collisionManager = new CollisionManager(level);
-
-        // управление игроком
-        keyboard = new GdxKeyboardListener();
-        keyboard.bindMoveUp(new MoveCommand(playerTank, Direction.UP, level));
-        keyboard.bindMoveDown(new MoveCommand(playerTank, Direction.DOWN, level));
-        keyboard.bindMoveLeft(new MoveCommand(playerTank, Direction.LEFT, level));
-        keyboard.bindMoveRight(new MoveCommand(playerTank, Direction.RIGHT, level));
-        keyboard.bindShoot(new ShootCommand(playerTank, level, 20));
-        keyboard.bindToggleHealth(new ToggleHealthCommand(
-                uiState, levelGraphics, level, batch, groundLayer));
     }
 
     @Override
     public void render() {
         float dt = Gdx.graphics.getDeltaTime();
 
-        // 1–2. команды от игрока и ИИ
+        // 1–2. команды игрока + ИИ
         keyboard.update();
         for (RandomTankController ai : aiControllers) {
             ai.updateRandom();

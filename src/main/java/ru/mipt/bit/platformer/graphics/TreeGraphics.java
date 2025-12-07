@@ -37,6 +37,6 @@ public class TreeGraphics implements Graphics {
 
     @Override
     public void dispose() {
-        // НЕ трогаем TREE_TEXTURE — общий, живёт до конца игры.
+
     }
 }

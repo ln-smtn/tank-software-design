@@ -20,9 +20,12 @@ public class ShootCommand implements Command {
 
     @Override
     public void execute() {
+        if (tank == null || level == null) return;
+        if (tank.isRemovable()) return;
+
         Direction dir = tank.getDirection();
 
-        // ПУЛЯ СТАРТУЕТ ИЗ КЛЕТКИ ТАНКА
+
         GridPoint2 start = tank.getPosition();
 
         Bullet bullet = new Bullet(start, dir, damage, tank);
